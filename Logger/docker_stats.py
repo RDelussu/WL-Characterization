@@ -13,7 +13,7 @@ basename_file = f"stats_output_{timestamp}"
 # Container info
 container = "first_test"
 name_image = "one/ad-base:v2"
-bash_file = "source DemoAD_start.sh"
+bash_file = "source DemoAD_start.sh" # bash_command
 gpu_enabled = False  # True if GPU is used
 
 # Docker stats options
@@ -24,7 +24,7 @@ cpuset_cpus = "2"
 gpus = "device=0"
 
 # Sampling info
-interval = 0.5  # seconds
+interval = 0.1  # seconds
 num_iterations = 100
 
 # Output files
