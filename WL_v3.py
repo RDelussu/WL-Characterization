@@ -81,7 +81,7 @@ CSV_FILE = os.path.join(folder_path,'stats_output_20250918_160318_with_gpu.csv')
 
 # delta_t: se non lo conosci, lo calcolo più sotto dalla colonna Timestamp
 ASSUME_DELTA_T = 0.1  # se vuoi forzarlo metti un numero (s), altrimenti None per calcolo automatico
-NUM_CORES = detect_num_cores()
+NUM_CORES = 1 # detect_num_cores()
 # ---------- LETTURA ----------
 df = pd.read_csv(CSV_FILE, parse_dates=['Timestamp'])
 print(f"Total rows of csvv: {len(df)}")
@@ -109,6 +109,8 @@ df['cpu_percent'] = df['CPU %'].str.replace('%', '').str.replace('%', '').astype
 df['mem_percent'] = df['Mem %'].str.replace('%', '').str.replace('%', '').astype(float)
 df[['net_io_read', 'net_io_write']] = df['Net I/O'].str.replace(' ', '').str.split('/', expand=True)
 df[['block_io_read', 'block_io_write']] = df['Block I/O'].str.replace(' ', '').str.split('/', expand=True)
+df[['gpu_mem_used', 'gpu_mem_total']] = df['GPU Memory Usage'].str.replace(' ', '').str.split('/', expand=True)
+
 
 # ---------- Calcolo automatico delta_t (opzionale) ----------
 if ASSUME_DELTA_T is None:
@@ -235,7 +237,7 @@ output = {
     'avg_mem_percent': round(float(row['mem_percent']), 2) if not pd.isna(row['mem_percent']) else None,
     'avg_net_io_MBps': round(float(row['net_io_MBps']), 4) if not pd.isna(row['net_io_MBps']) else None,
     'avg_block_io_MBps': round(float(row['block_io_MBps']), 4) if not pd.isna(row['block_io_MBps']) else None,
-    'gpu_mem_intensive': bool(row['gpu_mem_percent'] >= 80),
+    'gpu_mem_intensive': round(float(row['gpu_mem_percent']), 4) if not pd.isna(row['gpu_mem_percent']) else None,
     'workload_type': row['wl_type'] if 'wl_type' in row else None
 }
 

@@ -77,7 +77,7 @@ def parse_size(size_str):
 
 # ---------- PARAMETRI ----------
 foler_path= '../../Downloads/'
-CSV_FILE = os.path.join(foler_path,'stats_output_mem_cpu_limit.csv')
+CSV_FILE = os.path.join(foler_path,'stats_output_20250918_160318_with_gpu.csv')
 NUM_CORES = detect_num_cores()   # numero di core logici
 
 # ---------- LETTURA CSV ----------
