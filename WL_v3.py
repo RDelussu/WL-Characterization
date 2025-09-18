@@ -73,8 +73,12 @@ def assign_wl_type(df, num_cores, max_net_io=10*1024*1024, max_block_io=100*1024
     return df
 
 # ---------- CONFIG ----------
-foler_path= '../../Downloads/'
-CSV_FILE = os.path.join(foler_path,'stats_output_20250912_112249_cpu_only.csv')
+#folder_path= '../../Downloads/'
+#CSV_FILE = os.path.join(folder_path,'stats_output_20250912_112249_cpu_only.csv')
+
+folder_path= 'backend/'
+CSV_FILE = os.path.join(folder_path,'stats_output_20250918_160318_with_gpu.csv')
+
 # delta_t: se non lo conosci, lo calcolo più sotto dalla colonna Timestamp
 ASSUME_DELTA_T = 1  # se vuoi forzarlo metti un numero (s), altrimenti None per calcolo automatico
 NUM_CORES = detect_num_cores()
