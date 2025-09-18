@@ -80,7 +80,7 @@ folder_path= 'Logger/'
 CSV_FILE = os.path.join(folder_path,'stats_output_20250918_160318_with_gpu.csv')
 
 # delta_t: se non lo conosci, lo calcolo più sotto dalla colonna Timestamp
-ASSUME_DELTA_T = 1  # se vuoi forzarlo metti un numero (s), altrimenti None per calcolo automatico
+ASSUME_DELTA_T = 0.1  # se vuoi forzarlo metti un numero (s), altrimenti None per calcolo automatico
 NUM_CORES = detect_num_cores()
 # ---------- LETTURA ----------
 df = pd.read_csv(CSV_FILE, parse_dates=['Timestamp'])
