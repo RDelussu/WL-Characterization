@@ -1,0 +1,433 @@
+import os
+import json
+import time
+import queue
+import threading
+import datetime
+import subprocess
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+
+# ----------------------------
+# Utilities
+# ----------------------------
+def now_stamp(fmt="%Y%m%d_%H%M%S"):
+    return datetime.datetime.now().strftime(fmt)
+
+def safe_run(cmd, **popen_kwargs):
+    """
+    Run a subprocess command and return (retcode, stdout, stderr) with UTF-8 decoding.
+    """
+    try:
+        res = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            **popen_kwargs
+        )
+        return res.returncode, res.stdout.strip(), res.stderr.strip()
+    except FileNotFoundError as e:
+        return 127, "", str(e)
+    except Exception as e:
+        return 1, "", str(e)
+
+def docker_available():
+    code, out, err = safe_run(["docker", "--version"])
+    return code == 0
+
+def nvidia_smi_available():
+    code, out, err = safe_run(["nvidia-smi", "--help"])
+    return code == 0
+
+# ----------------------------
+# Worker (background thread)
+# ----------------------------
+class StatsWorker(threading.Thread):
+    def __init__(self, params, log_q, stop_event):
+        super().__init__(daemon=True)
+        self.params = params
+        self.log_q = log_q
+        self.stop_event = stop_event
+
+    def log(self, msg):
+        self.log_q.put(msg)
+
+    def write_config(self, config_path, config_obj):
+        with open(config_path, "w") as f:
+            json.dump(config_obj, f, indent=2)
+
+    def ensure_csv_header(self, csv_path, gpu_enabled):
+        if not os.path.exists(csv_path):
+            with open(csv_path, "w") as f:
+                if gpu_enabled:
+                    f.write("Timestamp,Iteration,Container,Name,CPU %,Mem Usage,Mem %,Net I/O,Block I/O,PIDs,"
+                            "GPU Power,GPU Temp.,Virtual RAM,GPU Utilization,GPU Memory Usage\n")
+                else:
+                    f.write("Timestamp,Iteration,Container,Name,CPU %,Mem Usage,Mem %,Net I/O,Block I/O,PIDs\n")
+
+    def container_active(self, name):
+        code, out, err = safe_run(
+            ["docker", "ps", "--filter", f"name=^/{name}$", "--format", "{{.Names}}"]
+        )
+        if code != 0:
+            return False
+        return name in out.splitlines()
+
+    def rm_container(self, name, force=False):
+        if not name:
+            return
+        cmd = ["docker", "rm"]
+        if force:
+            cmd.append("-f")
+        cmd.append(name)
+        safe_run(cmd)
+
+    def run_one_iteration(self, i, files, p):
+        """
+        Start container, monitor with docker stats, append CSV, stop when container exits
+        or when stop_event is set.
+        """
+        # Build docker run
+        docker_run_cmd = [
+            "docker", "run", "-ti", "-d",
+            "--memory", p["memory"],
+            "--memory-reservation", p["memory_reservation"],
+            "--cpus", p["cpus"],
+            "--cpuset-cpus", p["cpuset_cpus"],
+            "--name", p["container"]
+        ]
+
+        if p["gpu_enabled"]:
+            docker_run_cmd += ["--runtime=nvidia", "--gpus", p["gpus"]]
+
+        docker_run_cmd += [p["name_image"], "bash", "-c", p["bash_file"]]
+
+        self.log(f"[{i}] Launching container: {' '.join(docker_run_cmd)}")
+        code, out, err = safe_run(docker_run_cmd)
+
+        if code != 0:
+            self.log(f"[{i}] ERROR starting container: {err or out}")
+            return False  # fail this iteration
+
+        # Poll until container exits or stop requested
+        interval = float(p["interval"])
+        while not self.stop_event.is_set():
+            if not self.container_active(p["container"]):
+                self.log(f"[{i}] Container '{p['container']}' is no longer active. Exiting iteration.")
+                break
+
+            timestamp_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            stats_cmd = [
+                "docker", "stats", "--no-stream",
+                "--format", "{{.Container}},{{.Name}},{{.CPUPerc}},{{.MemUsage}},{{.MemPerc}},{{.NetIO}},{{.BlockIO}},{{.PIDs}}",
+                p["container"]
+            ]
+            scode, sout, serr = safe_run(stats_cmd)
+            if scode != 0:
+                self.log(f"[{i}] WARNING: docker stats failed: {serr or sout}")
+                time.sleep(interval)
+                continue
+
+            line = sout.strip()
+            try:
+                with open(files["csv"], "a") as f:
+                    if p["gpu_enabled"]:
+                        # Query GPU stats
+                        ncode, nout, nerr = safe_run([
+                            "nvidia-smi",
+                            "--query-gpu=power.draw,temperature.gpu,utilization.memory,utilization.gpu,memory.used,memory.total",
+                            "--format=csv,noheader,nounits", "-i", "0"
+                        ])
+                        if ncode == 0 and nout:
+                            gpu_stats = [x.strip() for x in nout.split(",")]
+                            # GPU columns: power, temp, util.mem, util.gpu, mem.used/mem.total
+                            gpu_line = ",".join(gpu_stats[:4] + [f"{gpu_stats[4]}/{gpu_stats[5]}"])
+                            f.write(f"{timestamp_now},{i},{line},{gpu_line}\n")
+                        else:
+                            self.log(f"[{i}] WARNING: nvidia-smi failed: {nerr or nout}")
+                            f.write(f"{timestamp_now},{i},{line},,,,,\n")
+                    else:
+                        f.write(f"{timestamp_now},{i},{line}\n")
+            except Exception as e:
+                self.log(f"[{i}] ERROR writing CSV: {e}")
+                return False
+
+            time.sleep(interval)
+
+        # Attempt to remove container (non-fatal if fails)
+        self.rm_container(p["container"])
+        return True
+
+    def run(self):
+        p = self.params
+
+        # Pre-flight checks
+        if not docker_available():
+            self.log("ERROR: 'docker' not found or not runnable. Please install Docker and ensure it is on PATH.")
+            return
+        if p["gpu_enabled"] and not nvidia_smi_available():
+            self.log("ERROR: GPU mode selected, but 'nvidia-smi' not found. Install NVIDIA drivers/tooling or disable GPU.")
+            return
+
+        # Prepare output paths
+        ts = now_stamp()
+        base = f"stats_output_{ts}"
+        out_dir = p["output_dir"] or os.getcwd()
+        os.makedirs(out_dir, exist_ok=True)
+
+        files = {
+            "config": os.path.join(out_dir, f"{base}_config.json"),
+            "csv": os.path.join(out_dir, f"{base}_{'with_gpu' if p['gpu_enabled'] else 'cpu_only'}.csv")
+        }
+
+        # Write config JSON (aligned with original script)
+        config_obj = {
+            "timestamp": ts,
+            "output_basename": base,
+            "container": {
+                "name": p["container"],
+                "image": p["name_image"],
+                "gpu_enabled": p["gpu_enabled"],
+                "bash_command": p["bash_file"]
+            },
+            "docker_stats": {
+                "memory": p["memory"],
+                "memory_reservation": p["memory_reservation"],
+                "cpus": p["cpus"],
+                "cpuset_cpus": p["cpuset_cpus"],
+                "gpus": p["gpus"]
+            },
+            "sampling": {
+                "interval_seconds": float(p["interval"]),
+                "num_iterations": int(p["num_iterations"])
+            }
+        }
+        try:
+            self.write_config(files["config"], config_obj)
+        except Exception as e:
+            self.log(f"ERROR writing config: {e}")
+            return
+
+        # Ensure CSV header
+        try:
+            self.ensure_csv_header(files["csv"], p["gpu_enabled"])
+        except Exception as e:
+            self.log(f"ERROR preparing CSV: {e}")
+            return
+
+        self.log(f"Outputs:\n- Config: {files['config']}\n- CSV: {files['csv']}")
+        self.log("Starting iterations...")
+
+        for i in range(1, int(p["num_iterations"]) + 1):
+            if self.stop_event.is_set():
+                self.log("Stop requested. Halting before next iteration.")
+                break
+
+            self.log(f"Iteration {i}/{p['num_iterations']}")
+            ok = self.run_one_iteration(i, files, p)
+            if not ok:
+                self.log(f"[{i}] Iteration aborted due to errors.")
+                break
+
+        self.log("Done.")
+
+# ----------------------------
+# GUI
+# ----------------------------
+class App(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Docker Stats Runner (GUI)")
+        self.geometry("900x680")
+        self.minsize(900, 680)
+
+        self.stop_event = threading.Event()
+        self.worker = None
+        self.log_q = queue.Queue()
+
+        self._build_widgets()
+        self._poll_log_queue()
+
+    def _build_widgets(self):
+        pad = {"padx": 8, "pady": 6}
+
+        notebook = ttk.Notebook(self)
+        notebook.pack(fill="both", expand=True)
+
+        frm_general = ttk.Frame(notebook)
+        frm_resources = ttk.Frame(notebook)
+        frm_sampling = ttk.Frame(notebook)
+        frm_output = ttk.Frame(notebook)
+        notebook.add(frm_general, text="General")
+        notebook.add(frm_resources, text="Resources")
+        notebook.add(frm_sampling, text="Sampling")
+        notebook.add(frm_output, text="Output")
+
+        # General tab
+        self.var_container = tk.StringVar(value="first_test")
+        self.var_image = tk.StringVar(value="one/ad-base:v2")
+        self.var_bash = tk.StringVar(value="source DemoAD_start.sh")
+        self.var_gpu = tk.BooleanVar(value=False)
+        self.var_gpuspec = tk.StringVar(value="device=0")
+
+        row = 0
+        ttk.Label(frm_general, text="Container name").grid(row=row, column=0, sticky="e", **pad)
+        ttk.Entry(frm_general, textvariable=self.var_container, width=40).grid(row=row, column=1, sticky="w", **pad)
+
+        row += 1
+        ttk.Label(frm_general, text="Image").grid(row=row, column=0, sticky="e", **pad)
+        ttk.Entry(frm_general, textvariable=self.var_image, width=40).grid(row=row, column=1, sticky="w", **pad)
+
+        row += 1
+        ttk.Label(frm_general, text="Bash command").grid(row=row, column=0, sticky="e", **pad)
+        ttk.Entry(frm_general, textvariable=self.var_bash, width=40).grid(row=row, column=1, sticky="w", **pad)
+
+        row += 1
+        ttk.Checkbutton(frm_general, text="Enable GPU (nvidia-smi required)", variable=self.var_gpu).grid(row=row, column=1, sticky="w", **pad)
+
+        row += 1
+        ttk.Label(frm_general, text="--gpus").grid(row=row, column=0, sticky="e", **pad)
+        ttk.Entry(frm_general, textvariable=self.var_gpuspec, width=20).grid(row=row, column=1, sticky="w", **pad)
+
+        # Resources tab
+        self.var_memory = tk.StringVar(value="1g")
+        self.var_mem_res = tk.StringVar(value="999m")
+        self.var_cpus = tk.StringVar(value="1")
+        self.var_cpuset = tk.StringVar(value="2")
+
+        row = 0
+        ttk.Label(frm_resources, text="--memory").grid(row=row, column=0, sticky="e", **pad)
+        ttk.Entry(frm_resources, textvariable=self.var_memory, width=15).grid(row=row, column=1, sticky="w", **pad)
+
+        row += 1
+        ttk.Label(frm_resources, text="--memory-reservation").grid(row=row, column=0, sticky="e", **pad)
+        ttk.Entry(frm_resources, textvariable=self.var_mem_res, width=15).grid(row=row, column=1, sticky="w", **pad)
+
+        row += 1
+        ttk.Label(frm_resources, text="--cpus").grid(row=row, column=0, sticky="e", **pad)
+        ttk.Entry(frm_resources, textvariable=self.var_cpus, width=15).grid(row=row, column=1, sticky="w", **pad)
+
+        row += 1
+        ttk.Label(frm_resources, text="--cpuset-cpus").grid(row=row, column=0, sticky="e", **pad)
+        ttk.Entry(frm_resources, textvariable=self.var_cpuset, width=15).grid(row=row, column=1, sticky="w", **pad)
+
+        # Sampling tab
+        self.var_interval = tk.StringVar(value="0.5")
+        self.var_iterations = tk.StringVar(value="100")
+
+        row = 0
+        ttk.Label(frm_sampling, text="Interval (seconds)").grid(row=row, column=0, sticky="e", **pad)
+        ttk.Entry(frm_sampling, textvariable=self.var_interval, width=10).grid(row=row, column=1, sticky="w", **pad)
+
+        row += 1
+        ttk.Label(frm_sampling, text="Iterations").grid(row=row, column=0, sticky="e", **pad)
+        ttk.Entry(frm_sampling, textvariable=self.var_iterations, width=10).grid(row=row, column=1, sticky="w", **pad)
+
+        # Output tab
+        self.var_outdir = tk.StringVar(value=os.getcwd())
+        row = 0
+        ttk.Label(frm_output, text="Output directory").grid(row=row, column=0, sticky="e", **pad)
+        ent_out = ttk.Entry(frm_output, textvariable=self.var_outdir, width=50)
+        ent_out.grid(row=row, column=1, sticky="w", **pad)
+        ttk.Button(frm_output, text="Browse…", command=self._pick_dir).grid(row=row, column=2, sticky="w", **pad)
+
+        # Control bar
+        bar = ttk.Frame(self)
+        bar.pack(fill="x", padx=8, pady=6)
+        self.btn_start = ttk.Button(bar, text="Start", command=self._on_start)
+        self.btn_stop = ttk.Button(bar, text="Stop", command=self._on_stop, state="disabled")
+        self.btn_start.pack(side="left")
+        self.btn_stop.pack(side="left", padx=6)
+
+        # Log area
+        frm_log = ttk.LabelFrame(self, text="Log")
+        frm_log.pack(fill="both", expand=True, padx=8, pady=6)
+        self.txt = tk.Text(frm_log, height=16, wrap="word")
+        self.txt.pack(fill="both", expand=True, padx=6, pady=6)
+        self.txt.configure(state="disabled")
+
+    def _pick_dir(self):
+        d = filedialog.askdirectory(initialdir=self.var_outdir.get() or os.getcwd())
+        if d:
+            self.var_outdir.set(d)
+
+    def _gather_params(self):
+        try:
+            interval = float(self.var_interval.get())
+            iters = int(self.var_iterations.get())
+            if interval <= 0 or iters <= 0:
+                raise ValueError
+        except Exception:
+            raise ValueError("Interval must be a positive number and Iterations a positive integer.")
+
+        return {
+            "container": self.var_container.get().strip(),
+            "name_image": self.var_image.get().strip(),
+            "bash_file": self.var_bash.get().strip(),
+            "gpu_enabled": bool(self.var_gpu.get()),
+            "gpus": self.var_gpuspec.get().strip() or "device=0",
+            "memory": self.var_memory.get().strip(),
+            "memory_reservation": self.var_mem_res.get().strip(),
+            "cpus": self.var_cpus.get().strip(),
+            "cpuset_cpus": self.var_cpuset.get().strip(),
+            "interval": interval,
+            "num_iterations": iters,
+            "output_dir": self.var_outdir.get().strip(),
+        }
+
+    def _on_start(self):
+        if self.worker and self.worker.is_alive():
+            messagebox.showinfo("Running", "A run is already in progress.")
+            return
+        try:
+            params = self._gather_params()
+        except ValueError as e:
+            messagebox.showerror("Invalid parameters", str(e))
+            return
+
+        if not params["container"]:
+            messagebox.showerror("Invalid parameters", "Container name must not be empty.")
+            return
+        if not params["name_image"]:
+            messagebox.showerror("Invalid parameters", "Image must not be empty.")
+            return
+        if not params["bash_file"]:
+            messagebox.showerror("Invalid parameters", "Bash command must not be empty.")
+            return
+
+        self.stop_event.clear()
+        self.worker = StatsWorker(params, self.log_q, self.stop_event)
+        self.worker.start()
+        self._set_running(True)
+        self._log_to_ui("=== Run started ===")
+
+    def _on_stop(self):
+        if self.worker and self.worker.is_alive():
+            self.stop_event.set()
+            self._log_to_ui("Stop requested. Attempting to halt gracefully...")
+        self._set_running(False)
+
+    def _set_running(self, running: bool):
+        self.btn_start.configure(state="disabled" if running else "normal")
+        self.btn_stop.configure(state="normal" if running else "disabled")
+
+    def _log_to_ui(self, msg: str):
+        self.txt.configure(state="normal")
+        self.txt.insert("end", msg + "\n")
+        self.txt.see("end")
+        self.txt.configure(state="disabled")
+
+    def _poll_log_queue(self):
+        try:
+            while True:
+                msg = self.log_q.get_nowait()
+                self._log_to_ui(msg)
+        except queue.Empty:
+            pass
+        # re-arm polling
+        self.after(150, self._poll_log_queue)
+
+if __name__ == "__main__":
+    app = App()
+    app.mainloop()
