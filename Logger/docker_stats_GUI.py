@@ -13,6 +13,28 @@ import sys
 import subprocess
 import pprint
 
+# Lookup table con (Thermal Design Power) TDP (aggiungine altri modelli se serve)
+CPU_TDP_TABLE = {
+    "Intel(R) Core(TM) i7-9750H": 45,
+    "Intel(R) Core(TM) i5-8250U": 15,
+    "Intel(R) Core(TM) i7-10750H": 45,
+    "Intel(R) Core(TM) i9-9900K": 95,
+    "Intel(R) Core(TM) i7-8700K": 95,
+    "Intel(R) Core(TM) i5-9600K": 95,
+    "AMD Ryzen 5 3600": 65,
+    "AMD Ryzen 7 3700X": 65,
+    "AMD Ryzen 9 3900X": 105,
+    "AMD Ryzen 9 5950X": 105,
+    "AMD Ryzen 7 5800X": 105,
+    "AMD Ryzen 5 5600X": 65,
+}
+
+def lookup_tdp(cpu_name: str):
+    for key, tdp in CPU_TDP_TABLE.items():
+        if key in cpu_name:
+            return tdp
+    return None
+
 def get_cpu_report():
     report = {}
 
@@ -40,6 +62,15 @@ def get_cpu_report():
                         break
         except FileNotFoundError:
             pass
+        # Proviamo a leggere TDP se disponibile
+        try:
+            tdp_output = subprocess.check_output("lscpu", shell=True).decode()
+            for line in tdp_output.splitlines():
+                if "TDP" in line:
+                    report["cpu_power_watt"] = line.split(":")[1].strip()
+                    break
+        except Exception:
+            report["cpu_power_watt"] = None
 
     elif sys.platform == "darwin":  # macOS
         try:
@@ -48,6 +79,7 @@ def get_cpu_report():
             ).strip().decode()
         except Exception:
             pass
+        report["cpu_power_watt"] = None  # non disponibile nativamente
 
     elif sys.platform == "win32":  # Windows
         try:
@@ -56,11 +88,16 @@ def get_cpu_report():
             ).decode().split("\n")[1].strip()
         except Exception:
             pass
+        report["cpu_power_watt"] = None  # non disponibile via WMI standard
 
     report["cpu_model_name"] = model_name or platform.processor() or "N/A"
 
-    return report
+    # --- Lookup TDP (se non già trovato dal sistema) ---
+    if report.get("cpu_power_watt") in [None, ""]:
+        tdp_value = lookup_tdp(report["cpu_model_name"])
+        report["cpu_power_watt"] = f"{tdp_value} W" if tdp_value else None
 
+    return report
 
 # ----------------------------
 # Utilities
