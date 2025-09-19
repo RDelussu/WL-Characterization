@@ -7,6 +7,60 @@ import datetime
 import subprocess
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+import platform
+import psutil
+import sys
+import subprocess
+import pprint
+
+def get_cpu_report():
+    report = {}
+
+    # --- Frequenze ---
+    freq = psutil.cpu_freq()
+    if freq:
+        report["cpu_mhz"] = round(freq.current, 2)   # frequenza attuale
+        report["cpu_clock_min_mhz"] = round(freq.min, 2)
+        report["cpu_clock_max_mhz"] = round(freq.max, 2)  # "potenza max"
+    else:
+        report["cpu_mhz"] = report["cpu_clock_min_mhz"] = report["cpu_clock_max_mhz"] = "N/A"
+
+    # --- Cores ---
+    report["cpu_cores_physical"] = psutil.cpu_count(logical=False)
+    report["cpu_cores_logical"] = psutil.cpu_count(logical=True)
+
+    # --- Model name CPU (OS specific) ---
+    model_name = None
+    if sys.platform.startswith("linux"):
+        try:
+            with open("/proc/cpuinfo") as f:
+                for line in f:
+                    if "model name" in line:
+                        model_name = line.strip().split(":")[1].strip()
+                        break
+        except FileNotFoundError:
+            pass
+
+    elif sys.platform == "darwin":  # macOS
+        try:
+            model_name = subprocess.check_output(
+                ["sysctl", "-n", "machdep.cpu.brand_string"]
+            ).strip().decode()
+        except Exception:
+            pass
+
+    elif sys.platform == "win32":  # Windows
+        try:
+            model_name = subprocess.check_output(
+                ["wmic", "cpu", "get", "Name"]
+            ).decode().split("\n")[1].strip()
+        except Exception:
+            pass
+
+    report["cpu_model_name"] = model_name or platform.processor() or "N/A"
+
+    return report
+
 
 # ----------------------------
 # Utilities
@@ -176,10 +230,12 @@ class StatsWorker(threading.Thread):
         out_dir = p["output_dir"] or os.getcwd()
         os.makedirs(out_dir, exist_ok=True)
 
+        cpu_info = get_cpu_report()
         files = {
             "config": os.path.join(out_dir, f"{base}_config.json"),
             "csv": os.path.join(out_dir, f"{base}_{'with_gpu' if p['gpu_enabled'] else 'cpu_only'}.csv")
         }
+
 
         # Write config JSON (aligned with original script)
         config_obj = {
@@ -201,10 +257,21 @@ class StatsWorker(threading.Thread):
             "sampling": {
                 "interval_seconds": float(p["interval"]),
                 "num_iterations": int(p["num_iterations"])
+            },
+            "Processor Information": {
+                "cpu_mhz": cpu_info["cpu_mhz"],
+                "cpu_clock_min_mhz": cpu_info["cpu_clock_min_mhz"],
+                "cpu_clock_max_mhz": cpu_info["cpu_clock_max_mhz"], # "potenza max"
+                "cpu_cores_physical": cpu_info["cpu_cores_physical"],
+                "cpu_cores_logical": cpu_info["cpu_cores_logical"],
+                "cpu_model_name": cpu_info["cpu_model_name"],
             }
         }
         try:
             self.write_config(files["config"], config_obj)
+            # Salvataggio in JSON
+            with open("cpu_info.json", "w", encoding="utf-8") as f:
+                json.dump(cpu_info, f, indent=4, ensure_ascii=False)
         except Exception as e:
             self.log(f"ERROR writing config: {e}")
             return
