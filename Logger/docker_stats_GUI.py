@@ -152,10 +152,10 @@ class StatsWorker(threading.Thread):
         if not os.path.exists(csv_path):
             with open(csv_path, "w") as f:
                 if gpu_enabled:
-                    f.write("Timestamp,Iteration,Container,Name,CPU %,Mem Usage,Mem %,Net I/O,Block I/O,PIDs,"
-                            "GPU Power,GPU Temp.,Virtual RAM,GPU Utilization,GPU Memory Usage\n")
+                    f.write("Timestamp,Iteration,Container,Name,CPU MHz,CPU Min MHz,CPU Max MHz,CPU %,Mem Usage,Mem %,Net I/O,Block I/O,PIDs,"
+                            "GPU Power (W),GPU Temp. (°C),Virtual RAM (%),GPU Utilization (%),GPU Memory Usage (B)\n")
                 else:
-                    f.write("Timestamp,Iteration,Container,Name,CPU %,Mem Usage,Mem %,Net I/O,Block I/O,PIDs\n")
+                    f.write("Timestamp,Iteration,Container,Name,CPU MHz,CPU Min MHz,CPU Max MHz, CPU %,Mem Usage,Mem %,Net I/O,Block I/O,PIDs\n")
 
     def container_active(self, name):
         code, out, err = safe_run(
@@ -221,6 +221,19 @@ class StatsWorker(threading.Thread):
                 continue
 
             line = sout.strip()
+            # --- CPU Info --- #
+            freq = psutil.cpu_freq()
+            if freq:
+                cpu_cur = round(freq.current, 2)
+                cpu_min = round(freq.min, 2)
+                cpu_max = round(freq.max, 2)
+            else:
+                cpu_cur = cpu_min = cpu_max = "N/A"
+
+            # Costruisci la riga con i campi aggiuntivi
+            line_with_cpu = f"{line.split(',')[0]},{line.split(',')[1]},{cpu_cur},{cpu_min},{cpu_max}," + ",".join(
+                line.split(',')[2:])
+
             try:
                 with open(files["csv"], "a") as f:
                     if p["gpu_enabled"]:
@@ -234,10 +247,10 @@ class StatsWorker(threading.Thread):
                             gpu_stats = [x.strip() for x in nout.split(",")]
                             # GPU columns: power, temp, util.mem, util.gpu, mem.used/mem.total
                             gpu_line = ",".join(gpu_stats[:4] + [f"{gpu_stats[4]}/{gpu_stats[5]}"])
-                            f.write(f"{timestamp_now},{i},{line},{gpu_line}\n")
+                            f.write(f"{timestamp_now},{i},{line_with_cpu},{gpu_line}\n")
                         else:
                             self.log(f"[{i}] WARNING: nvidia-smi failed: {nerr or nout}")
-                            f.write(f"{timestamp_now},{i},{line},,,,,\n")
+                            f.write(f"{timestamp_now},{i},{line_with_cpu},,,,,\n")
                     else:
                         f.write(f"{timestamp_now},{i},{line}\n")
             except Exception as e:
@@ -296,7 +309,7 @@ class StatsWorker(threading.Thread):
                 "num_iterations": int(p["num_iterations"])
             },
             "Processor Information": {
-                "cpu_mhz": cpu_info["cpu_mhz"],
+                "current cpu_mhz": cpu_info["cpu_mhz"],
                 "cpu_clock_min_mhz": cpu_info["cpu_clock_min_mhz"],
                 "cpu_clock_max_mhz": cpu_info["cpu_clock_max_mhz"], # "potenza max"
                 "cpu_cores_physical": cpu_info["cpu_cores_physical"],
