@@ -7,6 +7,97 @@ import datetime
 import subprocess
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+import platform
+import psutil
+import sys
+import subprocess
+import pprint
+
+# Lookup table con (Thermal Design Power) TDP (aggiungine altri modelli se serve)
+CPU_TDP_TABLE = {
+    "Intel(R) Core(TM) i7-9750H": 45,
+    "Intel(R) Core(TM) i5-8250U": 15,
+    "Intel(R) Core(TM) i7-10750H": 45,
+    "Intel(R) Core(TM) i9-9900K": 95,
+    "Intel(R) Core(TM) i7-8700K": 95,
+    "Intel(R) Core(TM) i5-9600K": 95,
+    "AMD Ryzen 5 3600": 65,
+    "AMD Ryzen 7 3700X": 65,
+    "AMD Ryzen 9 3900X": 105,
+    "AMD Ryzen 9 5950X": 105,
+    "AMD Ryzen 7 5800X": 105,
+    "AMD Ryzen 5 5600X": 65,
+}
+
+def lookup_tdp(cpu_name: str):
+    for key, tdp in CPU_TDP_TABLE.items():
+        if key in cpu_name:
+            return tdp
+    return None
+
+def get_cpu_report():
+    report = {}
+
+    # --- Frequenze ---
+    freq = psutil.cpu_freq()
+    if freq:
+        report["cpu_mhz"] = round(freq.current, 2)   # frequenza attuale
+        report["cpu_clock_min_mhz"] = round(freq.min, 2)
+        report["cpu_clock_max_mhz"] = round(freq.max, 2)  # "potenza max"
+    else:
+        report["cpu_mhz"] = report["cpu_clock_min_mhz"] = report["cpu_clock_max_mhz"] = "N/A"
+
+    # --- Cores ---
+    report["cpu_cores_physical"] = psutil.cpu_count(logical=False)
+    report["cpu_cores_logical"] = psutil.cpu_count(logical=True)
+
+    # --- Model name CPU (OS specific) ---
+    model_name = None
+    if sys.platform.startswith("linux"):
+        try:
+            with open("/proc/cpuinfo") as f:
+                for line in f:
+                    if "model name" in line:
+                        model_name = line.strip().split(":")[1].strip()
+                        break
+        except FileNotFoundError:
+            pass
+        # Proviamo a leggere TDP se disponibile
+        try:
+            tdp_output = subprocess.check_output("lscpu", shell=True).decode()
+            for line in tdp_output.splitlines():
+                if "TDP" in line:
+                    report["cpu_power_watt"] = line.split(":")[1].strip()
+                    break
+        except Exception:
+            report["cpu_power_watt"] = None
+
+    elif sys.platform == "darwin":  # macOS
+        try:
+            model_name = subprocess.check_output(
+                ["sysctl", "-n", "machdep.cpu.brand_string"]
+            ).strip().decode()
+        except Exception:
+            pass
+        report["cpu_power_watt"] = None  # non disponibile nativamente
+
+    elif sys.platform == "win32":  # Windows
+        try:
+            model_name = subprocess.check_output(
+                ["wmic", "cpu", "get", "Name"]
+            ).decode().split("\n")[1].strip()
+        except Exception:
+            pass
+        report["cpu_power_watt"] = None  # non disponibile via WMI standard
+
+    report["cpu_model_name"] = model_name or platform.processor() or "N/A"
+
+    # --- Lookup TDP (se non già trovato dal sistema) ---
+    if report.get("cpu_power_watt") in [None, ""]:
+        tdp_value = lookup_tdp(report["cpu_model_name"])
+        report["cpu_power_watt"] = f"{tdp_value} W" if tdp_value else None
+
+    return report
 
 # ----------------------------
 # Utilities
@@ -61,10 +152,10 @@ class StatsWorker(threading.Thread):
         if not os.path.exists(csv_path):
             with open(csv_path, "w") as f:
                 if gpu_enabled:
-                    f.write("Timestamp,Iteration,Container,Name,CPU %,Mem Usage,Mem %,Net I/O,Block I/O,PIDs,"
-                            "GPU Power,GPU Temp.,Virtual RAM,GPU Utilization,GPU Memory Usage\n")
+                    f.write("Timestamp,Iteration,Container,Name,CPU MHz,CPU Min MHz,CPU Max MHz,CPU %,Mem Usage,Mem %,Net I/O,Block I/O,PIDs,"
+                            "GPU Power (W),GPU Temp. (°C),Virtual RAM (%),GPU Utilization (%),GPU Memory Usage (B)\n")
                 else:
-                    f.write("Timestamp,Iteration,Container,Name,CPU %,Mem Usage,Mem %,Net I/O,Block I/O,PIDs\n")
+                    f.write("Timestamp,Iteration,Container,Name,CPU MHz,CPU Min MHz,CPU Max MHz, CPU %,Mem Usage,Mem %,Net I/O,Block I/O,PIDs\n")
 
     def container_active(self, name):
         code, out, err = safe_run(
@@ -130,6 +221,20 @@ class StatsWorker(threading.Thread):
                 continue
 
             line = sout.strip()
+            # --- CPU Info --- #
+            freq = psutil.cpu_freq()
+            if freq:
+                cpu_cur = round(freq.current, 2)
+                cpu_min = round(freq.min, 2)
+                cpu_max = round(freq.max, 2)
+            else:
+                cpu_cur = cpu_min = cpu_max = "N/A"
+
+            # Costruisci la riga con i campi aggiuntivi
+            line_with_cpu = f"{line.split(',')[0]},{line.split(',')[1]},{cpu_cur},{cpu_min},{cpu_max}," + ",".join(
+                line.split(',')[2:])
+            print('line with cpu\n',line_with_cpu)
+
             try:
                 with open(files["csv"], "a") as f:
                     if p["gpu_enabled"]:
@@ -143,10 +248,10 @@ class StatsWorker(threading.Thread):
                             gpu_stats = [x.strip() for x in nout.split(",")]
                             # GPU columns: power, temp, util.mem, util.gpu, mem.used/mem.total
                             gpu_line = ",".join(gpu_stats[:4] + [f"{gpu_stats[4]}/{gpu_stats[5]}"])
-                            f.write(f"{timestamp_now},{i},{line},{gpu_line}\n")
+                            f.write(f"{timestamp_now},{i},{line_with_cpu},{gpu_line}\n")
                         else:
                             self.log(f"[{i}] WARNING: nvidia-smi failed: {nerr or nout}")
-                            f.write(f"{timestamp_now},{i},{line},,,,,\n")
+                            f.write(f"{timestamp_now},{i},{line_with_cpu},,,,,\n")
                     else:
                         f.write(f"{timestamp_now},{i},{line}\n")
             except Exception as e:
@@ -176,10 +281,12 @@ class StatsWorker(threading.Thread):
         out_dir = p["output_dir"] or os.getcwd()
         os.makedirs(out_dir, exist_ok=True)
 
+        cpu_info = get_cpu_report()
         files = {
             "config": os.path.join(out_dir, f"{base}_config.json"),
             "csv": os.path.join(out_dir, f"{base}_{'with_gpu' if p['gpu_enabled'] else 'cpu_only'}.csv")
         }
+
 
         # Write config JSON (aligned with original script)
         config_obj = {
@@ -201,10 +308,21 @@ class StatsWorker(threading.Thread):
             "sampling": {
                 "interval_seconds": float(p["interval"]),
                 "num_iterations": int(p["num_iterations"])
+            },
+            "Processor Information": {
+                "current cpu_mhz": cpu_info["cpu_mhz"],
+                "cpu_clock_min_mhz": cpu_info["cpu_clock_min_mhz"],
+                "cpu_clock_max_mhz": cpu_info["cpu_clock_max_mhz"], # "potenza max"
+                "cpu_cores_physical": cpu_info["cpu_cores_physical"],
+                "cpu_cores_logical": cpu_info["cpu_cores_logical"],
+                "cpu_model_name": cpu_info["cpu_model_name"],
             }
         }
         try:
             self.write_config(files["config"], config_obj)
+            # Salvataggio in JSON
+            with open("cpu_info.json", "w", encoding="utf-8") as f:
+                json.dump(cpu_info, f, indent=4, ensure_ascii=False)
         except Exception as e:
             self.log(f"ERROR writing config: {e}")
             return
@@ -402,11 +520,43 @@ class App(tk.Tk):
         self._set_running(True)
         self._log_to_ui("=== Run started ===")
 
+
     def _on_stop(self):
         if self.worker and self.worker.is_alive():
             self.stop_event.set()
             self._log_to_ui("Stop requested. Attempting to halt gracefully...")
+    
+        # Legge il nome del container dalla StringVar di Tkinter
+        container_name = self.var_container.get().strip() if hasattr(self, "var_container") else None
+    
+        if container_name:
+            try:
+                self._log_to_ui(f"Stopping Docker container '{container_name}'...")
+                subprocess.run(["docker", "stop", container_name], check=True)
+                self._log_to_ui(f"Container '{container_name}' stopped successfully.")
+            except subprocess.CalledProcessError as e:
+                self._log_to_ui(f"⚠️ Failed to stop container '{container_name}': {e}")
+        else:
+            self._log_to_ui("⚠️ No container name defined — skipping Docker stop.")
+    
+        # Rimuove i container fermi (status=exited)
+        try:
+            self._log_to_ui("Removing stopped containers...")
+            exited_containers = subprocess.check_output(
+                ["docker", "ps", "-a", "-q", "-f", "status=exited"]
+            ).decode().split()
+    
+            if exited_containers:
+                for cid in exited_containers:
+                    subprocess.run(["docker", "rm", cid], check=False)
+                self._log_to_ui(f"🧹 Removed {len(exited_containers)} stopped container(s).")
+            else:
+                self._log_to_ui("No stopped containers to remove.")
+        except Exception as e:
+            self._log_to_ui(f"⚠️ Failed to remove stopped containers: {e}")
+    
         self._set_running(False)
+    
 
     def _set_running(self, running: bool):
         self.btn_start.configure(state="disabled" if running else "normal")

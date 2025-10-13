@@ -233,6 +233,7 @@ class StatsWorker(threading.Thread):
             # Costruisci la riga con i campi aggiuntivi
             line_with_cpu = f"{line.split(',')[0]},{line.split(',')[1]},{cpu_cur},{cpu_min},{cpu_max}," + ",".join(
                 line.split(',')[2:])
+            print('line with cpu\n',line_with_cpu)
 
             try:
                 with open(files["csv"], "a") as f:
@@ -519,11 +520,43 @@ class App(tk.Tk):
         self._set_running(True)
         self._log_to_ui("=== Run started ===")
 
+
     def _on_stop(self):
         if self.worker and self.worker.is_alive():
             self.stop_event.set()
             self._log_to_ui("Stop requested. Attempting to halt gracefully...")
+    
+        # Legge il nome del container dalla StringVar di Tkinter
+        container_name = self.var_container.get().strip() if hasattr(self, "var_container") else None
+    
+        if container_name:
+            try:
+                self._log_to_ui(f"Stopping Docker container '{container_name}'...")
+                subprocess.run(["docker", "stop", container_name], check=True)
+                self._log_to_ui(f"Container '{container_name}' stopped successfully.")
+            except subprocess.CalledProcessError as e:
+                self._log_to_ui(f"⚠️ Failed to stop container '{container_name}': {e}")
+        else:
+            self._log_to_ui("⚠️ No container name defined — skipping Docker stop.")
+    
+        # Rimuove i container fermi (status=exited)
+        try:
+            self._log_to_ui("Removing stopped containers...")
+            exited_containers = subprocess.check_output(
+                ["docker", "ps", "-a", "-q", "-f", "status=exited"]
+            ).decode().split()
+    
+            if exited_containers:
+                for cid in exited_containers:
+                    subprocess.run(["docker", "rm", cid], check=False)
+                self._log_to_ui(f"🧹 Removed {len(exited_containers)} stopped container(s).")
+            else:
+                self._log_to_ui("No stopped containers to remove.")
+        except Exception as e:
+            self._log_to_ui(f"⚠️ Failed to remove stopped containers: {e}")
+    
         self._set_running(False)
+    
 
     def _set_running(self, running: bool):
         self.btn_start.configure(state="disabled" if running else "normal")
