@@ -553,7 +553,7 @@ class App(tk.Tk):
             else:
                 self._log_to_ui("No stopped containers to remove.")
         except Exception as e:
-            self._log_to_ui(f"⚠️ Failed to remove stopped containers: {e}")
+            self._log_to_ui(f"Failed to remove stopped containers: {e}")
     
         self._set_running(False)
     
