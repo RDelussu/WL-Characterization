@@ -152,10 +152,10 @@ class StatsWorker(threading.Thread):
         if not os.path.exists(csv_path):
             with open(csv_path, "w") as f:
                 if gpu_enabled:
-                    f.write("Timestamp,Iteration,Container,Name,CPU MHz,CPU Min MHz,CPU Max MHz,CPU %,Mem Usage,Mem %,Net I/O,Block I/O,PIDs,"
+                    f.write("Timestamp,Iteration,Container,Name,CPU %,Mem Usage,Mem %,Net I/O,Block I/O,PIDs,CPU MHz,CPU Min MHz,CPU Max MHz"
                             "GPU Power (W),GPU Temp. (°C),Virtual RAM (%),GPU Utilization (%),GPU Memory Usage (B)\n")
                 else:
-                    f.write("Timestamp,Iteration,Container,Name,CPU MHz,CPU Min MHz,CPU Max MHz, CPU %,Mem Usage,Mem %,Net I/O,Block I/O,PIDs\n")
+                    f.write("Timestamp,Iteration,Container,Name,CPU %,Mem Usage,Mem %,Net I/O,Block I/O,PIDs,CPU MHz,CPU Min MHz,CPU Max MHz\n")
 
     def container_active(self, name):
         code, out, err = safe_run(
@@ -221,6 +221,7 @@ class StatsWorker(threading.Thread):
                 continue
 
             line = sout.strip()
+            #print('line', line)
             # --- CPU Info --- #
             freq = psutil.cpu_freq()
             if freq:
@@ -231,9 +232,9 @@ class StatsWorker(threading.Thread):
                 cpu_cur = cpu_min = cpu_max = "N/A"
 
             # Costruisci la riga con i campi aggiuntivi
-            line_with_cpu = f"{line.split(',')[0]},{line.split(',')[1]},{cpu_cur},{cpu_min},{cpu_max}," + ",".join(
-                line.split(',')[2:])
-            print('line with cpu\n',line_with_cpu)
+            #line_with_cpu = f"{line.split(',')[0]},{line.split(',')[1]},{cpu_cur},{cpu_min},{cpu_max}," + ",".join(
+            #    line.split(',')[2:])
+            line_with_cpu = f"{line},{cpu_cur},{cpu_min},{cpu_max}"
 
             try:
                 with open(files["csv"], "a") as f:
@@ -253,12 +254,12 @@ class StatsWorker(threading.Thread):
                             self.log(f"[{i}] WARNING: nvidia-smi failed: {nerr or nout}")
                             f.write(f"{timestamp_now},{i},{line_with_cpu},,,,,\n")
                     else:
-                        f.write(f"{timestamp_now},{i},{line}\n")
+                        f.write(f"{timestamp_now},{i},{line_with_cpu}\n")
             except Exception as e:
                 self.log(f"[{i}] ERROR writing CSV: {e}")
                 return False
 
-            time.sleep(interval)
+            #time.sleep(interval)
 
         # Attempt to remove container (non-fatal if fails)
         self.rm_container(p["container"])
@@ -431,7 +432,7 @@ class App(tk.Tk):
         ttk.Entry(frm_resources, textvariable=self.var_cpuset, width=15).grid(row=row, column=1, sticky="w", **pad)
 
         # Sampling tab
-        self.var_interval = tk.StringVar(value="0.5")
+        self.var_interval = tk.StringVar(value="0.1")
         self.var_iterations = tk.StringVar(value="100")
 
         row = 0
