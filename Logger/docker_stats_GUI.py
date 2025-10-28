@@ -42,6 +42,7 @@ def get_cpu_report():
     freq = psutil.cpu_freq()
     if freq:
         report["cpu_mhz"] = round(freq.current, 2)   # frequenza attuale
+        #print("sono in GET CPU REPORT -- frequenza attuale-corrente", freq.current)
         report["cpu_clock_min_mhz"] = round(freq.min, 2)
         report["cpu_clock_max_mhz"] = round(freq.max, 2)  # "potenza max"
     else:
@@ -223,14 +224,24 @@ class StatsWorker(threading.Thread):
             line = sout.strip()
             #print('line', line)
             # --- CPU Info --- #
-            freq = psutil.cpu_freq()
+            #freq = psutil.cpu_freq()
+            #if freq:
+            #    cpu_cur = round(freq.current, 2)
+            #    cpu_min = round(freq.min, 2)
+            #    cpu_max = round(freq.max, 2)
+            #else:
+            #    cpu_cur = cpu_min = cpu_max = "N/A"
+            #print("frequenza attuale-corrente", freq.current)
+
+            freq = get_cpu_report()
             if freq:
-                cpu_cur = round(freq.current, 2)
-                cpu_min = round(freq.min, 2)
-                cpu_max = round(freq.max, 2)
+                cpu_cur = round(freq["cpu_mhz"], 2)
+                cpu_min = round(freq["cpu_clock_min_mhz"], 2)
+                cpu_max = round(freq["cpu_clock_max_mhz"], 2)
             else:
                 cpu_cur = cpu_min = cpu_max = "N/A"
-
+            # print("frequenza attuale-corrente", cpu_cur)
+            
             # Costruisci la riga con i campi aggiuntivi
             #line_with_cpu = f"{line.split(',')[0]},{line.split(',')[1]},{cpu_cur},{cpu_min},{cpu_max}," + ",".join(
             #    line.split(',')[2:])
@@ -444,7 +455,7 @@ class App(tk.Tk):
         ttk.Entry(frm_sampling, textvariable=self.var_iterations, width=10).grid(row=row, column=1, sticky="w", **pad)
 
         # Output tab
-        self.var_outdir = tk.StringVar(value=os.getcwd())
+        self.var_outdir = tk.StringVar(value=os.path.join(os.getcwd(),'stats_output'))
         row = 0
         ttk.Label(frm_output, text="Output directory").grid(row=row, column=0, sticky="e", **pad)
         ent_out = ttk.Entry(frm_output, textvariable=self.var_outdir, width=50)
@@ -536,9 +547,9 @@ class App(tk.Tk):
                 subprocess.run(["docker", "stop", container_name], check=True)
                 self._log_to_ui(f"Container '{container_name}' stopped successfully.")
             except subprocess.CalledProcessError as e:
-                self._log_to_ui(f"⚠️ Failed to stop container '{container_name}': {e}")
+                self._log_to_ui(f"Failed to stop container '{container_name}': {e}")
         else:
-            self._log_to_ui("⚠️ No container name defined — skipping Docker stop.")
+            self._log_to_ui("No container name defined — skipping Docker stop.")
     
         # Rimuove i container fermi (status=exited)
         try:
@@ -550,7 +561,7 @@ class App(tk.Tk):
             if exited_containers:
                 for cid in exited_containers:
                     subprocess.run(["docker", "rm", cid], check=False)
-                self._log_to_ui(f"🧹 Removed {len(exited_containers)} stopped container(s).")
+                self._log_to_ui(f"Removed {len(exited_containers)} stopped container(s).")
             else:
                 self._log_to_ui("No stopped containers to remove.")
         except Exception as e:
