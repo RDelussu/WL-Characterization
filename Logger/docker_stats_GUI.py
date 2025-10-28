@@ -40,9 +40,13 @@ def get_cpu_report():
 
     # --- Frequenze ---
     freq = psutil.cpu_freq()
+    psutil_version = psutil.version_info
     if freq:
-        report["cpu_mhz"] = round(freq.current, 2)   # frequenza attuale
-        #print("sono in GET CPU REPORT -- frequenza attuale-corrente", freq.current)
+        if psutil_version == (5, 9, 0):
+            report["cpu_mhz"] = round(freq.current*1000, 2) # frequenza attuale
+        else:
+            report["cpu_mhz"] = round(freq.current, 2) # frequenza attuale
+        print("sono in GET CPU REPORT -- frequenza attuale-corrente", freq.current)
         report["cpu_clock_min_mhz"] = round(freq.min, 2)
         report["cpu_clock_max_mhz"] = round(freq.max, 2)  # "potenza max"
     else:
@@ -235,7 +239,8 @@ class StatsWorker(threading.Thread):
 
             freq = get_cpu_report()
             if freq:
-                cpu_cur = round(freq["cpu_mhz"], 2)
+                # cpu_cur = round(freq["cpu_mhz"], 2)
+                cpu_cur = freq["cpu_mhz"]
                 cpu_min = round(freq["cpu_clock_min_mhz"], 2)
                 cpu_max = round(freq["cpu_clock_max_mhz"], 2)
             else:
