@@ -34,10 +34,119 @@ def lookup_tdp(cpu_name: str):
         if key in cpu_name:
             return tdp
     return None
+# aggiunta queste due funzioni qui sotto: get_core_mapping_linux e get_physical_core_freq #
+def get_core_mapping_linux():
+    mapping = {}  # {logical_cpu: (physical_id, core_id)}
+    try:
+        with open("/proc/cpuinfo") as f:
+            cpu_info = {}
+            for line in f:
+                if not line.strip():
+                    if "processor" in cpu_info:
+                        mapping[int(cpu_info["processor"])] = (
+                            int(cpu_info.get("physical id", 0)),
+                            int(cpu_info.get("core id", 0)),
+                        )
+                    cpu_info = {}
+                else:
+                    key, _, value = line.partition(":")
+                    cpu_info[key.strip()] = value.strip()
+    except FileNotFoundError:
+        return {}
 
-def get_cpu_report():
+    return mapping
+
+def get_physical_core_freq(core_id):
+    mapping = get_core_mapping_linux()
+    # trova i thread che appartengono a quel core fisico
+    logical_cpus = [lid for lid, (_, cid) in mapping.items() if cid == core_id]
+    if not logical_cpus:
+        raise ValueError(f"Nessun core fisico con ID {core_id} trovato.")
+    
+    freqs = psutil.cpu_freq(percpu=True)
+    # media delle frequenze dei thread appartenenti al core fisico
+    psutil_version = psutil.version_info
+    if psutil_version == (5,9,0):
+        # print('sono dentro get_physical_... if psutil')
+        avg_freq = (sum(freqs[i].current for i in logical_cpus) / len(logical_cpus))*1000
+    else: 
+        avg_freq = sum(freqs[i].current for i in logical_cpus) / len(logical_cpus)
+
+    return avg_freq
+
+# qui sotto nuova get_cpu_report
+def get_cpu_report(physical_core_id=None):
     report = {}
+    # check psultil version - bug in 5.9.0 
+    # psutil_version = tuple(map(int, psutil.__version__.split('.')))
+    if physical_core_id is not None and sys.platform.startswith("linux"):
+        try:
+            report["cpu_mhz"] = round(get_physical_core_freq(physical_core_id), 2)
+        except Exception as e:
+            report["cpu_mhz"] = f"Error: {e}"
+    else:
+        freq = psutil.cpu_freq()
+        report["cpu_mhz"] = round(freq.current, 2) if freq else "N/A"
 
+    report["cpu_clock_min_mhz"] = round(psutil.cpu_freq().min, 2) 
+    report["cpu_clock_max_mhz"] = round(psutil.cpu_freq().max, 2) 
+    report["cpu_cores_physical"] = psutil.cpu_count(logical=False)
+    report["cpu_cores_logical"] = psutil.cpu_count(logical=True)
+    report["cpu_model_name"] = platform.processor()
+
+    # --- Model name CPU (OS specific) ---
+    model_name = None
+    if sys.platform.startswith("linux"):
+        try:
+            with open("/proc/cpuinfo") as f:
+                for line in f:
+                    if "model name" in line:
+                        model_name = line.strip().split(":")[1].strip()
+                        break
+        except FileNotFoundError:
+            pass
+        # Proviamo a leggere TDP se disponibile
+        try:
+            tdp_output = subprocess.check_output("lscpu", shell=True).decode()
+            for line in tdp_output.splitlines():
+                if "TDP" in line:
+                    report["cpu_power_watt"] = line.split(":")[1].strip()
+                    break
+        except Exception:
+            report["cpu_power_watt"] = None
+
+    elif sys.platform == "darwin":  # macOS
+        try:
+            model_name = subprocess.check_output(
+                ["sysctl", "-n", "machdep.cpu.brand_string"]
+            ).strip().decode()
+        except Exception:
+            pass
+        report["cpu_power_watt"] = None  # non disponibile nativamente
+
+    elif sys.platform == "win32":  # Windows
+        try:
+            model_name = subprocess.check_output(
+                ["wmic", "cpu", "get", "Name"]
+            ).decode().split("\n")[1].strip()
+        except Exception:
+            pass
+        report["cpu_power_watt"] = None  # non disponibile via WMI standard
+
+    report["cpu_model_name"] = model_name or platform.processor() or "N/A"
+
+    # --- Lookup TDP (se non già trovato dal sistema) ---
+    if report.get("cpu_power_watt") in [None, ""]:
+        tdp_value = lookup_tdp(report["cpu_model_name"])
+        report["cpu_power_watt"] = f"{tdp_value} W" if tdp_value else None
+
+
+    return report
+
+
+def NO_get_cpu_report():
+    report = {}
+    
     # --- Frequenze ---
     freq = psutil.cpu_freq()
     psutil_version = psutil.version_info
@@ -46,7 +155,8 @@ def get_cpu_report():
             report["cpu_mhz"] = round(freq.current*1000, 2) # frequenza attuale
         else:
             report["cpu_mhz"] = round(freq.current, 2) # frequenza attuale
-        print("sono in GET CPU REPORT -- frequenza attuale-corrente", freq.current)
+        
+        # print("sono in GET CPU REPORT -- frequenza attuale-corrente", report["cpu_mhz"])
         report["cpu_clock_min_mhz"] = round(freq.min, 2)
         report["cpu_clock_max_mhz"] = round(freq.max, 2)  # "potenza max"
     else:
@@ -103,7 +213,7 @@ def get_cpu_report():
         report["cpu_power_watt"] = f"{tdp_value} W" if tdp_value else None
 
     return report
-
+    
 # ----------------------------
 # Utilities
 # ----------------------------
@@ -145,6 +255,7 @@ class StatsWorker(threading.Thread):
         self.params = params
         self.log_q = log_q
         self.stop_event = stop_event
+        self.list_cpu_curr = []
 
     def log(self, msg):
         self.log_q.put(msg)
@@ -157,7 +268,7 @@ class StatsWorker(threading.Thread):
         if not os.path.exists(csv_path):
             with open(csv_path, "w") as f:
                 if gpu_enabled:
-                    f.write("Timestamp,Iteration,Container,Name,CPU %,Mem Usage,Mem %,Net I/O,Block I/O,PIDs,CPU MHz,CPU Min MHz,CPU Max MHz"
+                    f.write("Timestamp,Iteration,Container,Name,CPU %,Mem Usage,Mem %,Net I/O,Block I/O,PIDs,CPU MHz,CPU Min MHz,CPU Max MHz,"
                             "GPU Power (W),GPU Temp. (°C),Virtual RAM (%),GPU Utilization (%),GPU Memory Usage (B)\n")
                 else:
                     f.write("Timestamp,Iteration,Container,Name,CPU %,Mem Usage,Mem %,Net I/O,Block I/O,PIDs,CPU MHz,CPU Min MHz,CPU Max MHz\n")
@@ -206,6 +317,7 @@ class StatsWorker(threading.Thread):
             self.log(f"[{i}] ERROR starting container: {err or out}")
             return False  # fail this iteration
 
+        
         # Poll until container exits or stop requested
         interval = float(p["interval"])
         while not self.stop_event.is_set():
@@ -226,26 +338,20 @@ class StatsWorker(threading.Thread):
                 continue
 
             line = sout.strip()
-            #print('line', line)
-            # --- CPU Info --- #
-            #freq = psutil.cpu_freq()
-            #if freq:
-            #    cpu_cur = round(freq.current, 2)
-            #    cpu_min = round(freq.min, 2)
-            #    cpu_max = round(freq.max, 2)
-            #else:
-            #    cpu_cur = cpu_min = cpu_max = "N/A"
-            #print("frequenza attuale-corrente", freq.current)
 
-            freq = get_cpu_report()
+            # freq = get_cpu_report(physical_core_id=p["cpuset_cpus"])
+            physical_cores = [int(x) for x in p["cpuset_cpus"].split(',') if x.strip().isdigit()]
+            # print('physical cores', physical_cores)
+            freq = get_cpu_report(physical_core_id=physical_cores[0] if physical_cores else None)
             if freq:
                 # cpu_cur = round(freq["cpu_mhz"], 2)
-                cpu_cur = freq["cpu_mhz"]
+                cpu_cur = round(freq["cpu_mhz"], 2)
                 cpu_min = round(freq["cpu_clock_min_mhz"], 2)
                 cpu_max = round(freq["cpu_clock_max_mhz"], 2)
             else:
                 cpu_cur = cpu_min = cpu_max = "N/A"
             # print("frequenza attuale-corrente", cpu_cur)
+            self.list_cpu_curr.append(cpu_cur)
             
             # Costruisci la riga con i campi aggiuntivi
             #line_with_cpu = f"{line.split(',')[0]},{line.split(',')[1]},{cpu_cur},{cpu_min},{cpu_max}," + ",".join(
@@ -280,10 +386,10 @@ class StatsWorker(threading.Thread):
         # Attempt to remove container (non-fatal if fails)
         self.rm_container(p["container"])
         return True
-
+        
     def run(self):
         p = self.params
-
+    
         # Pre-flight checks
         if not docker_available():
             self.log("ERROR: 'docker' not found or not runnable. Please install Docker and ensure it is on PATH.")
@@ -291,21 +397,63 @@ class StatsWorker(threading.Thread):
         if p["gpu_enabled"] and not nvidia_smi_available():
             self.log("ERROR: GPU mode selected, but 'nvidia-smi' not found. Install NVIDIA drivers/tooling or disable GPU.")
             return
-
+    
         # Prepare output paths
         ts = now_stamp()
         base = f"stats_output_{ts}"
         out_dir = p["output_dir"] or os.getcwd()
         os.makedirs(out_dir, exist_ok=True)
-
-        cpu_info = get_cpu_report()
+    
         files = {
             "config": os.path.join(out_dir, f"{base}_config.json"),
             "csv": os.path.join(out_dir, f"{base}_{'with_gpu' if p['gpu_enabled'] else 'cpu_only'}.csv")
         }
+    
+        # CSV header
+        try:
+            self.ensure_csv_header(files["csv"], p["gpu_enabled"])
+        except Exception as e:
+            self.log(f"ERROR preparing CSV: {e}")
+            return
+    
+        # Lista per tutte le frequenze raccolte
+        self.list_cpu_curr = []
+    
+        self.log(f"Outputs:\n- Config: {files['config']}\n- CSV: {files['csv']}")
+        self.log("Starting iterations...")
+    
+        for i in range(1, int(p["num_iterations"]) + 1):
+            if self.stop_event.is_set():
+                self.log("Stop requested. Halting before next iteration.")
+                break
+    
+            self.log(f"Iteration {i}/{p['num_iterations']}")
+            ok = self.run_one_iteration(i, files, p)
+            if not ok:
+                self.log(f"[{i}] Iteration aborted due to errors.")
+                break
+    
+        # Tutte le iterazioni completate → calcolo media CPU
+        self.log("All iterations completed. Calculating average CPU frequency...")
+    
+        # Otteniamo info CPU max and min
+        # cpu_info = get_cpu_report(physical_core_id=p["cpuset_cpus"])
+        physical_cores = [int(x) for x in p["cpuset_cpus"].split(',') if x.strip().isdigit()]
+        # print('physical cores', physical_cores)
+        cpu_info = get_cpu_report(physical_core_id=physical_cores[0] if physical_cores else None)
 
-
-        # Write config JSON (aligned with original script)
+    
+        # Calcoliamo media CPU MHz raccolta durante le iterazioni
+        psutil_version = psutil.version_info
+        if self.list_cpu_curr:
+            if psutil_version == (5,9,0):
+                avg_cpu_mhz = (sum(self.list_cpu_curr) / len(self.list_cpu_curr)) #*1000 
+            else:
+                avg_cpu_mhz = sum(self.list_cpu_curr) / len(self.list_cpu_curr)
+        else:
+            avg_cpu_mhz = cpu_info["cpu_mhz"]
+    
+        # Creiamo l’oggetto JSON finale
         config_obj = {
             "timestamp": ts,
             "output_basename": base,
@@ -327,45 +475,28 @@ class StatsWorker(threading.Thread):
                 "num_iterations": int(p["num_iterations"])
             },
             "Processor Information": {
-                "current cpu_mhz": cpu_info["cpu_mhz"],
+                "cpu_mhz_avg": round(float(avg_cpu_mhz), 2),
                 "cpu_clock_min_mhz": cpu_info["cpu_clock_min_mhz"],
-                "cpu_clock_max_mhz": cpu_info["cpu_clock_max_mhz"], # "potenza max"
+                "cpu_clock_max_mhz": cpu_info["cpu_clock_max_mhz"],
                 "cpu_cores_physical": cpu_info["cpu_cores_physical"],
                 "cpu_cores_logical": cpu_info["cpu_cores_logical"],
                 "cpu_model_name": cpu_info["cpu_model_name"],
+                "cpu_power_watt": cpu_info["cpu_power_watt"],
             }
         }
+    
         try:
             self.write_config(files["config"], config_obj)
-            # Salvataggio in JSON
             with open("cpu_info.json", "w", encoding="utf-8") as f:
                 json.dump(cpu_info, f, indent=4, ensure_ascii=False)
         except Exception as e:
-            self.log(f"ERROR writing config: {e}")
+            self.log(f"ERROR writing final config: {e}")
             return
-
-        # Ensure CSV header
-        try:
-            self.ensure_csv_header(files["csv"], p["gpu_enabled"])
-        except Exception as e:
-            self.log(f"ERROR preparing CSV: {e}")
-            return
-
-        self.log(f"Outputs:\n- Config: {files['config']}\n- CSV: {files['csv']}")
-        self.log("Starting iterations...")
-
-        for i in range(1, int(p["num_iterations"]) + 1):
-            if self.stop_event.is_set():
-                self.log("Stop requested. Halting before next iteration.")
-                break
-
-            self.log(f"Iteration {i}/{p['num_iterations']}")
-            ok = self.run_one_iteration(i, files, p)
-            if not ok:
-                self.log(f"[{i}] Iteration aborted due to errors.")
-                break
-
+    
+        # self.log(f"Average CPU frequency over all iterations: {round(avg_cpu_mhz, 2)} MHz")
+        self.log("Final JSON file saved successfully.")
         self.log("Done.")
+
 
 # ----------------------------
 # GUI
