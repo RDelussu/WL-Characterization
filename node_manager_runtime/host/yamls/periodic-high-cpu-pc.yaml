@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: periodic-high-cpu
+  labels:
+    app: periodic-high-cpu
+spec:
+  containers:
+    - name: periodic-high-cpu-container
+      image: chrimadeddu/periodic_high_cpu_pc:latest
+      imagePullPolicy: IfNotPresent
+      env:
+        - name: exec_time
+          value: "30"
+        - name: idle_time
+          value: "5"
+        - name: iterations
+          value: "2"
+      ports:
+        - containerPort: 8080
+  restartPolicy: Never

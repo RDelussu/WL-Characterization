@@ -1,0 +1,33 @@
+1)Flashing della scheda sd con kria ubuntu 22.04 LTS
+Scaricare kria ubuntu 22.04 LTS al link https://ubuntu.com/download/amd#kria-k26
+Scaricare Raspberry Pi Imager al link https://www.raspberrypi.com/software/ (o programma analogo) e flashare la scheda sd seguendo le istruzioni del programma
+Inserire la scheda sd nella kria e avviare (username: ubuntu, password: ubuntu)
+
+2)Scaricare tutte le librerie necessarie sull'host e sul worker
+sudo bash set_env_host.sh
+eseguire sudo bash set_env_worker.sh facendo attenzione a sostituire i campi PKG e TMPDIR con i percorsi corretti dei file
+
+3)Scaricare lightweight kubernetes k3s sulla kria sostituendo <IP_MASTER> e <TOKEN> con ip (comando Hostname -I) e token (comando sudo cat /var/lib/rancher/k3s/server/node-token) mostrati dall'host
+sudo bash set_k3s_kria.sh
+
+4)Impostare la kria come worker dall'host
+sudo kubectl get nodes per ottenere il nome della kria nel cluster e sostituirlo in kubectl label nodes <NAME> role=worker
+
+4)Sul worker entrare nella cartella worker e avviare il node manager per monitoraggio
+python3 node_manager.py
+
+5)Sull'host entrare nella cartella host e mettere in esecuzione dei pod. I risultati vengono salvati nella cartella results_test del worker.
+python3 pod_start.py
+
+5a)Se necessario modificare il file parameters_test.csv per inserire pod diversi da eseguire.
+yaml name deve combaciare col nome del file senza estensione nella cartella yamls (ad esempio se si vuole eseguire container.yaml il campo yaml name deve contenere container).
+parameters contiene i parametri del pod (param1=val1;param2=val2).
+wait determina i secondi di attesa prima di eseguire il pod.
+
+6)Creare il dataset a partire dai dati monitorati.
+python3 dataset_creation.py
+
+7)Creare il modello
+python3 predictor.py
+
+8)Usare il node manager avviando i pod come al punto 4
