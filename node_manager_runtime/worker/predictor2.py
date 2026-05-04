@@ -8,7 +8,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-DATA_PATH = "results_test_pc/categories.csv"
+DATA_PATH = "results_test_kria/categories.csv"
 
 governor_map = {"powersave": 0, "userspace": 1, "performance": 2}
 category_map = {"cpu-intensive-high": 0, "memory-intensive-high": 1, "cpu-intensive-medium": 2, "memory-intensive-medium": 3, "cpu-intensive-low": 4, "block-intensive":5, "net-intensive":6}
