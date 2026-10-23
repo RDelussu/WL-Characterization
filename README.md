@@ -26,10 +26,22 @@ Configure the Docker container and workload execution:
 - GPU support: optionally enable GPU access and GPU monitoring
 
 Example configuration:
-Container name: test
+```text
+Container name: first_test
 Image: one/ad-base:v2
 Bash command: source DemoAD_start.sh
-Enable GPU: Disable
+Enable GPU: Disabled
+```
+In this example, the tool runs the DemoAD_start.sh workload inside a container .., without enabling the GPU.
+
+These values are provided as an example and must be adapted to the selected image and workload. The command must be supported by the shell available inside the container, and any required scripts must be present in the image or mounted into it.
+
+If GPU is required, enable the GPU option and specify the device, for example:
+```text
+Enable GPU: Enabled
+--gpus: device=0
+```
+Make sure that the NVIDIA drivers and `nvidia-smi` are correctly configured.
 
 ## Resource 
 Confifure Docker resource contraints:
@@ -38,14 +50,62 @@ Confifure Docker resource contraints:
 - CPU limit (--cpus): sets the maximum CPU capacity available to the container
 - --cpuset-cpus: specify the CPU cores on which the container is allowed to execute
 
+Example configuration:
+```text
+Memory limit: 1g
+Memory reservation: 999m
+CPU limit: 1
+--cpuset-cpus: 2
+```
+
+This configuration limits the container to one CPU equivalent and up to 1GB of memory, with CPU execution restricted to logical CPU 2. The memory reservation is a soft limit rather tha an additional memory allocation.
+
+The selected CPU IDs must exist on the host. Resource contraints should be choisen accordingly to the workload and the objective of the experiment.
+
 ## Sampling
 Configure the monitoring procedure:
 - sampling interval: time between consecutive monitoring samples, in seconds.
-- number of iterations: number of workload execution repetitions.
+- number of iterations: number of times the container is run during the experiment.
+
+Example configuration
+```text
+Interval (seconds): 0.5
+Iterations: 100
+```
+
+With this configuration, the tool runs the container up to 100 times, collecting resource-usage measurements at approximately 0.5-second intervals while each container execution is active. The number of samples collected for each execution depends on the workload duration and the monitoring execution time.
 
 ## Output
-Select the directory in which experiment outputs are stored.
+Select the directory in which experiment results will be saved. The tool creates the output directory if it does not exist.
+
+Example confifuration
+```text
+Output directory: ./results
+```
+
 The **Start** button launches the monitoring procedure, while **Stop** requests termination of the current run. The log panel displays execution messages, warnings, and errors.
+
+## Example experiment
+The following configuration illustrates a complete CPU-only experiment:
+
+| Parameter | Value |
+| --- | --- |
+| Container name | test |
+| Image | one/ad-base:v2 |
+| Bash command | source DemoAD_start.sh |
+| Enable GPU | Disabled |
+| Memory limit | 1g |
+| Memory reservation | 999m |
+| CPU limit | 1 |
+| --cpuset-cpus | 2 |
+| Interval (seconds) | 0.5 |
+| Iterations | 100 |
+| Output directory | ./results |
+| --- | --- |
+
+To reproduce the experiment, enter these values in the corresponding GUI tabs and click Start. Once the run has finished, inspect the generated CSV file to analyze the collected measurements and the JSON configuration file to verify the settings used.
+
+For a GPU-enabled experiment, enable GPU monitoring and configure the GPU device appropriately. The resulting CSV file will include the additional GPU measurements when they are available.
 
 ## Collected metrics
 Depending on the selected configuration and the availabily of the underlying monitored tools, the application collects metrics including:
@@ -58,11 +118,21 @@ Depending on the selected configuration and the availabily of the underlying mon
 - GPU: power, temperature, utilization, and memory usage when GPU monitoring is enabled.
 
 ## Ouput files
-Each monitoring run generates timestamped output files in the selected output directory.
-- CSV file: contains timestamped measurements collected during workload execution. Its name distinguishes GPU-enabled experiments from CPU-only experiments.
-- Configuration JSON: records the container image, execution command, resource constraints, sampling interval, number of iterations, and processor information.
-- CPU information JSON: stores processor information obtained during the experiment.
+Each run generates timestamped output files.
+Example directory struture
+```text
+results/
+|-- stats_output_20261023_103000_cpu_only.csv
+|-- stats_output_20261023_103000_config.json
+cpu_info.json
+```
+The filenames above are illustrative. 
+- `stats_output_20261023_103000_cpu_only.csv`: contains the measurements collected during a CPU-only experiment.
+- `stats_output_<timestamp>_with_gpu.csv`: contains the measurements collected when GPU monitoring is enabled.
+- `stats_output_20261023_103000_config.json`:  records the experiment configuration and processor information.
+- 'cpu_info.json': contains additional processor information. This file may be overwritten by subsequent runs.
 
+The CSV files contain timestamped measurements associated with the container and its execution iterations. See the Collected Metrics section for a description of the recorded values.
 ## Requirements
 - Linux
 - Python3
