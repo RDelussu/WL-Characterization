@@ -101,7 +101,7 @@ The following configuration illustrates a complete CPU-only experiment:
 | Interval (seconds) | 0.5 |
 | Iterations | 100 |
 | Output directory | ./results |
-| --- | --- |
+
 
 To reproduce the experiment, enter these values in the corresponding GUI tabs and click Start. Once the run has finished, inspect the generated CSV file to analyze the collected measurements and the JSON configuration file to verify the settings used.
 
