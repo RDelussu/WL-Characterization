@@ -1,0 +1,2 @@
+yaml_name,parameters,wait,reps
+cpu-test-pc,nodes=400000;edges=800000;num_sources=1000,1,3

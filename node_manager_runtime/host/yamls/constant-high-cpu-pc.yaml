@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: constant-high-cpu
+  labels:
+    app: constant-high-cpu
+spec:
+  containers:
+    - name: constant-high-cpu-container
+      image: chrimadeddu/constant_high_cpu_pc:latest
+      imagePullPolicy: IfNotPresent
+      env:
+        - name: exec_time
+          value: "30"
+        - name: idle_time
+          value: "5"
+      ports:
+        - containerPort: 8080
+  restartPolicy: Never

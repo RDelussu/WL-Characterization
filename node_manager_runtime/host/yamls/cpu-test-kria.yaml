@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cpu-test-kria
+  labels:
+    app: cpu-test-kria
+spec:
+  containers:
+    - name: cpu-test-kria-container
+      image: chrimadeddu/cpu_test_kria:latest
+      imagePullPolicy: IfNotPresent
+      ports:
+        - containerPort: 8080
+  restartPolicy: Never
+  tolerations:
+    - key: "cpu-control"
+      operator: "Equal"
+      value: "wait"
+      effect: "NoSchedule"
+  nodeSelector:
+    role: worker      
