@@ -130,7 +130,7 @@ The filenames above are illustrative.
 - `stats_output_20261023_103000_cpu_only.csv`: contains the measurements collected during a CPU-only experiment.
 - `stats_output_<timestamp>_with_gpu.csv`: contains the measurements collected when GPU monitoring is enabled.
 - `stats_output_20261023_103000_config.json`:  records the experiment configuration and processor information.
-- 'cpu_info.json': contains additional processor information. This file may be overwritten by subsequent runs.
+- `cpu_info.json`: contains additional processor information. This file may be overwritten by subsequent runs.
 
 The CSV files contain timestamped measurements associated with the container and its execution iterations. See the Collected Metrics section for a description of the recorded values.
 ## Requirements
