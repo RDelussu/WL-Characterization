@@ -45,8 +45,8 @@ The **Start** button launches the monitoring procedure, while **Stop** requests 
 Depending on the selected configuration and the availabily of the underlying monitored tools, the application collects metrics including:
 - CPU: utilization and frequency.
 - Memory: container memory usage and utilization percentage.
-- Network: network I/O.
-- Block I/O: block device ---
+- Network: data received and transmitted by the container.
+- Block I/O: amount of data read from and written to block devices by the container.
 - Processes: number of processes running in the container.
 - CPU energy and power: energy consumption and average power, where supported by Linux.
 - GPU: power, temperature, utilization, and memory usage when GPU monitoring is enabled.
