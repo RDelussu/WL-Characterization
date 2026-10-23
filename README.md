@@ -25,6 +25,16 @@ Configure the Docker container and workload execution:
 - Bash command: command executed inside the container
 - GPU support: optionally enable GPU access and GPU monitoring
 
+Example configuration:
+<CodeBlock language="markdown" editable>
+'''text
+Container name: test
+Image: one/ad-base:v2
+Bash command: source DemoAD_start.sh
+Enable GPU: Disable
+'''
+</CodeBlock>
+
 ## Resource 
 Confifure Docker resource contraints:
 - memory limit (--memory): sets the maximum amount of RAM that the container can use
@@ -63,6 +73,18 @@ Each monitoring run generates timestamped output files in the selected output di
 - Tkinter
 - psutil
 - Docker
+- Jupyter Notebook
+
+## Running WLC
+WLC is launched through the Jupyter Notebook 'runDockerStats_GUI.ipynb', which initializes the GUI.
+1. Open 'runDockerStats_GUI.ipynb' in Jupyter Notebook or JupyterLab.
+2. Execute the notebook cell to launch the GUI.
+3. Configure the experiment using General, Resources, Sampling and Output tabs.
+4. Click Start to begin the monitoring.
+
+Before launching the notebook, make sure that Python, Tkinter, psutil, and Docker are installed and properly configured.
+
+Note: The GUI requires a graphical desktop environment. If you are using Jupyter remotely or in an environment without a graphical display, the interface may not open correctly.
 
 ## Licence
 ...
