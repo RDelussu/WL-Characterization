@@ -26,14 +26,10 @@ Configure the Docker container and workload execution:
 - GPU support: optionally enable GPU access and GPU monitoring
 
 Example configuration:
-<CodeBlock language="markdown" editable>
-'''text
 Container name: test
 Image: one/ad-base:v2
 Bash command: source DemoAD_start.sh
 Enable GPU: Disable
-'''
-</CodeBlock>
 
 ## Resource 
 Confifure Docker resource contraints:
