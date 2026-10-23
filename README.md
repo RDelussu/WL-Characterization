@@ -45,17 +45,17 @@ Make sure that the NVIDIA drivers and `nvidia-smi` are correctly configured.
 
 ## Resource 
 Confifure Docker resource contraints:
-- memory limit (--memory): sets the maximum amount of RAM that the container can use
-- memory reservation (--memory-reservation): sets a soft memory limit 
+- Memory limit (--memory): sets the maximum amount of RAM that the container can use
+- Memory reservation (--memory-reservation): sets a soft memory limit 
 - CPU limit (--cpus): sets the maximum CPU capacity available to the container
-- --cpuset-cpus: specify the CPU cores on which the container is allowed to execute
+- CPU ID(s) (--cpuset-cpus): specify the CPU cores on which the container is allowed to execute
 
 Example configuration:
 ```text
 Memory limit: 1g
 Memory reservation: 999m
 CPU limit: 1
---cpuset-cpus: 2
+CPU ID(s): 2
 ```
 
 This configuration limits the container to one CPU equivalent and up to 1GB of memory, with CPU execution restricted to logical CPU 2. The memory reservation is a soft limit rather tha an additional memory allocation.
@@ -97,7 +97,7 @@ The following configuration illustrates a complete CPU-only experiment:
 | Memory limit | 1g |
 | Memory reservation | 999m |
 | CPU limit | 1 |
-| --cpuset-cpus | 2 |
+| CPU ID(s) | 2 |
 | Interval (seconds) | 0.5 |
 | Iterations | 100 |
 | Output directory | ./results |
