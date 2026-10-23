@@ -11,6 +11,7 @@ The tool is designed to support both controlled experiments, in which workloads 
 - Docker container execution: select a Docker image, specify the container name and execution command, and configure container resource constraints.
 - Resource monitoring: collect container statistics, including CPU utilization, memory usage, network I/O, block I/O, and process counts.
 - CPU monitoring: record current, minimum, and maximum CPU frequencies, together with processor information.
+- Energy monitoring: collect CPU energy consumption and calculate average CPU power.
 - GPU monitoring: optionally collect GPU power consumption, temperature, utilization, and memory usage using NVIDIA monitoring tools.
 - Configurable sampling: specify the monitoring interval and the number of workload execution iterations.
 - Experiment configuration: save execution parameters and processor information in JSON files.
@@ -19,28 +20,36 @@ The tool is designed to support both controlled experiments, in which workloads 
 
 ## General
 Configure the Docker container and workload execution:
-- container name
-- Docker image
-- Bash command executed inside the container
-- Optional GPU support
+- Container name: name assigned to the Docker container
+- Docker image: image used to run the workload
+- Bash command: command executed inside the container
+- GPU support: optionally enable GPU access and GPU monitoring
 
 ## Resource 
 Confifure Docker resource contraints:
-- memory limit (--memory) set the maximum amount of RAM that the container can use
-- memory reservation (--memory-reservation) sets a soft memory limit 
-- CPU limit (--cpus) sets the maximum CPU capacity available to the container
+- memory limit (--memory): sets the maximum amount of RAM that the container can use
+- memory reservation (--memory-reservation): sets a soft memory limit 
+- CPU limit (--cpus): sets the maximum CPU capacity available to the container
 - --cpuset-cpus: specify the CPU cores on which the container is allowed to execute
 
 ## Sampling
-- sampling interval (in seconds)
-- number of iterations
+Configure the monitoring procedure:
+- sampling interval: time between consecutive monitoring samples, in seconds.
+- number of iterations: number of workload execution repetitions.
 
 ## Output
 Select the directory in which experiment outputs are stored.
-The Start button launches the monitoring procedure, while Stop requests termination of the current run. The log panel displays execution messages, warnings, and errors.
+The **Start** button launches the monitoring procedure, while **Stop** requests termination of the current run. The log panel displays execution messages, warnings, and errors.
 
 ## Collected metrics
-Depending on the selected configuration and the availabily of the underlying monitored tools, the application collects metrics including CPU utilization, memory usage, network I/O, block I/O, and process counts.
+Depending on the selected configuration and the availabily of the underlying monitored tools, the application collects metrics including:
+- CPU: utilization and frequency.
+- Memory: container memory usage and utilization percentage.
+- Network: network I/O.
+- Block I/O: block device ---
+- Processes: number of processes running in the container.
+- CPU energy and power: energy consumption and average power, where supported by Linux.
+- GPU: power, temperature, utilization, and memory usage when GPU monitoring is enabled.
 
 ## Ouput files
 Each monitoring run generates timestamped output files in the selected output directory.
@@ -49,6 +58,7 @@ Each monitoring run generates timestamped output files in the selected output di
 - CPU information JSON: stores processor information obtained during the experiment.
 
 ## Requirements
+- Linux
 - Python3
 - Tkinter
 - psutil
