@@ -246,6 +246,119 @@ def nvidia_smi_available():
     code, out, err = safe_run(["nvidia-smi", "--help"])
     return code == 0
 
+def read_cpu_energy_counters():
+    """
+    Read Linux RAPL energy counters.
+    Prefer package-level counters to avoid double-counting subdomains.
+    Returns energy counters in microjoules.
+    """
+    roots = ["/sys/class/powercap", "/sys/devices/virtual/powercap"]
+    counters = {}
+    visited = set()
+
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+
+        for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
+            real_dir = os.path.realpath(dirpath)
+
+            if real_dir in visited:
+                dirnames[:] = []
+                continue
+            visited.add(real_dir)
+
+            if "energy_uj" not in filenames:
+                continue
+
+            try:
+                with open(os.path.join(real_dir, "energy_uj")) as f:
+                    energy_uj = int(f.read().strip())
+
+                try:
+                    with open(os.path.join(real_dir, "name")) as f:
+                        name = f.read().strip()
+                except OSError:
+                    name = os.path.basename(real_dir)
+
+                try:
+                    with open(os.path.join(real_dir, "max_energy_range_uj")) as f:
+                        max_range = int(f.read().strip())
+                except (OSError, ValueError):
+                    max_range = None
+
+                counters[real_dir] = {
+                    "energy_uj": energy_uj,
+                    "max_range_uj": max_range,
+                    "name": name,
+                }
+
+            except (OSError, ValueError):
+                continue
+
+    if not counters:
+        return {}
+
+    # Prefer package-level counters, when available.
+    packages = {
+        path: data
+        for path, data in counters.items()
+        if "package" in data["name"].lower()
+    }
+
+    if packages:
+        return packages
+
+    # Otherwise, retain only outermost counters to avoid double-counting.
+    selected = {}
+    for path, data in counters.items():
+        nested = any(
+            other != path
+            and os.path.commonpath([path, other]) == other
+            for other in counters
+        )
+        if not nested:
+            selected[path] = data
+
+    return selected
+
+
+def calculate_cpu_energy(start, end):
+    """
+    Calculate energy consumed between two readings.
+    Returns (energy_joules, domain_names).
+    """
+    if not start or not end:
+        return None, "N/A"
+
+    common_paths = set(start) & set(end)
+    if not common_paths:
+        return None, "N/A"
+
+    total_uj = 0
+    names = []
+
+    for path in common_paths:
+        before = start[path]
+        after = end[path]
+
+        delta = after["energy_uj"] - before["energy_uj"]
+
+        # Handle a single counter wraparound.
+        if delta < 0:
+            max_range = (
+                after["max_range_uj"] or before["max_range_uj"]
+            )
+            if not max_range:
+                return None, "N/A"
+
+            delta = max_range - before["energy_uj"] + after["energy_uj"]
+
+        total_uj += delta
+        names.append(before["name"])
+
+    return total_uj / 1_000_000, ";".join(names)
+
 # ----------------------------
 # Worker (background thread)
 # ----------------------------
@@ -269,9 +382,9 @@ class StatsWorker(threading.Thread):
             with open(csv_path, "w") as f:
                 if gpu_enabled:
                     f.write("Timestamp,Iteration,Container,Name,CPU %,Mem Usage,Mem %,Net I/O,Block I/O,PIDs,CPU MHz,CPU Min MHz,CPU Max MHz,"
-                            "GPU Power (W),GPU Temp. (°C),Virtual RAM (%),GPU Utilization (%),GPU Memory Usage (B)\n")
+                            "GPU Power (W),GPU Temp. (°C),Virtual RAM (%),GPU Utilization (%),GPU Memory Usage (B),CPU Energy (J),CPU Power (W)\n")
                 else:
-                    f.write("Timestamp,Iteration,Container,Name,CPU %,Mem Usage,Mem %,Net I/O,Block I/O,PIDs,CPU MHz,CPU Min MHz,CPU Max MHz\n")
+                    f.write("Timestamp,Iteration,Container,Name,CPU %,Mem Usage,Mem %,Net I/O,Block I/O,PIDs,CPU MHz,CPU Min MHz,CPU Max MHz,CPU Energy (J),CPU Power (W)\n")
 
     def container_active(self, name):
         code, out, err = safe_run(
@@ -317,6 +430,11 @@ class StatsWorker(threading.Thread):
             self.log(f"[{i}] ERROR starting container: {err or out}")
             return False  # fail this iteration
 
+        energy_prev = read_cpu_energy_counters()
+        energy_prev_time = time.monotonic()
+
+        if not energy_prev:
+            self.log( f"[{i}] WARNING: energy counters unavailable.. Energy and power will be recorded as N/A.")
         
         # Poll until container exits or stop requested
         interval = float(p["interval"])
@@ -338,6 +456,24 @@ class StatsWorker(threading.Thread):
                 continue
 
             line = sout.strip()
+
+            # energy and power
+            # --- CPU energy and average power for the sampling interval ---
+            energy_now = read_cpu_energy_counters()
+            energy_now_time = time.monotonic()
+
+            elapsed = energy_now_time - energy_prev_time
+
+            energy_j, energy_domain = calculate_cpu_energy(energy_prev, energy_now)
+
+            power_w = (energy_j / elapsed if energy_j is not None and elapsed > 0 else None)
+
+            # update values
+            energy_prev = energy_now
+            energy_prev_time = energy_now_time
+
+            energy_j_csv = (f"{energy_j:.6f}" if energy_j is not None else "N/A")
+            power_w_csv = (f"{power_w:.6f}" if power_w is not None else "N/A")
 
             # freq = get_cpu_report(physical_core_id=p["cpuset_cpus"])
             physical_cores = [int(x) for x in p["cpuset_cpus"].split(',') if x.strip().isdigit()]
@@ -371,12 +507,12 @@ class StatsWorker(threading.Thread):
                             gpu_stats = [x.strip() for x in nout.split(",")]
                             # GPU columns: power, temp, util.mem, util.gpu, mem.used/mem.total
                             gpu_line = ",".join(gpu_stats[:4] + [f"{gpu_stats[4]}/{gpu_stats[5]}"])
-                            f.write(f"{timestamp_now},{i},{line_with_cpu},{gpu_line}\n")
+                            f.write(f"{timestamp_now},{i},{line_with_cpu},{gpu_line},{energy_j_csv},{power_w_csv}\n")
                         else:
                             self.log(f"[{i}] WARNING: nvidia-smi failed: {nerr or nout}")
                             f.write(f"{timestamp_now},{i},{line_with_cpu},,,,,\n")
                     else:
-                        f.write(f"{timestamp_now},{i},{line_with_cpu}\n")
+                        f.write(f"{timestamp_now},{i},{line_with_cpu},{energy_j_csv},{power_w_csv}\n")
             except Exception as e:
                 self.log(f"[{i}] ERROR writing CSV: {e}")
                 return False
