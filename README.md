@@ -142,13 +142,14 @@ The CSV files contain timestamped measurements associated with the container and
 - Jupyter Notebook
 
 ## Running WLC
-WLC is launched through the Jupyter Notebook 'runDockerStats_GUI.ipynb', which initializes the GUI.
-1. Open 'runDockerStats_GUI.ipynb' in Jupyter Notebook or JupyterLab.
-2. Execute the notebook cell to launch the GUI.
-3. Configure the experiment using General, Resources, Sampling and Output tabs.
-4. Click Start to begin the monitoring.
+WLC is launched through the Jupyter Notebook located in the `Logger/` directory.
+1. Open the `Logger/` folder.
+2. Open `runDockerStats_GUI.ipynb` in Jupyter Notebook or JupyterLab.
+3. Execute the notebook cell to launch the GUI.
+4. Configure the experiment using **General**, **Resources**, **Sampling** and **Output** tabs.
+5. Click **Start** to begin the monitoring.
 
-Before launching the notebook, make sure that Python, Tkinter, psutil, and Docker are installed and properly configured.
+Before launching the notebook, make sure that Python, Tkinter, `psutil`, and Docker are installed and properly configured.
 
 Note: The GUI requires a graphical desktop environment. If you are using Jupyter remotely or in an environment without a graphical display, the interface may not open correctly.
 
