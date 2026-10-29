@@ -86,7 +86,7 @@ ASSUME_DELTA_T = 0.1  # set to None to estimate it automatically from the timest
 NUM_CORES = 1 # detect_num_cores()
 # ---------- LOAD DATA ----------
 df = pd.read_csv(CSV_FILE, parse_dates=['Timestamp'])
-print(f"Total rows of csvv: {len(df)}")
+print(f"Total rows of csv: {len(df)}")
 
 # ---------- DEBUG / VALIDATION ----------
 print("dtype iteration:", df['Iteration'].dtype)
