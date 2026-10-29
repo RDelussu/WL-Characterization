@@ -34,7 +34,7 @@ def lookup_tdp(cpu_name: str):
         if key in cpu_name:
             return tdp
     return None
-# aggiunta queste due funzioni qui sotto: get_core_mapping_linux e get_physical_core_freq #
+# more functins: get_core_mapping_linux e get_physical_core_freq #
 def get_core_mapping_linux():
     mapping = {}  # {logical_cpu: (physical_id, core_id)}
     try:
@@ -58,26 +58,25 @@ def get_core_mapping_linux():
 
 def get_physical_core_freq(core_id):
     mapping = get_core_mapping_linux()
-    # trova i thread che appartengono a quel core fisico
+    # find the threads associated with that physical core
     logical_cpus = [lid for lid, (_, cid) in mapping.items() if cid == core_id]
     if not logical_cpus:
-        raise ValueError(f"Nessun core fisico con ID {core_id} trovato.")
+        raise ValueError(f"No physical core found with ID {core_id} .")
     
     freqs = psutil.cpu_freq(percpu=True)
-    # media delle frequenze dei thread appartenenti al core fisico
+    # average frequency of the threads belonging to the physical core
     psutil_version = psutil.version_info
     if psutil_version == (5,9,0):
-        # print('sono dentro get_physical_... if psutil')
         avg_freq = (sum(freqs[i].current for i in logical_cpus) / len(logical_cpus))*1000
     else: 
         avg_freq = sum(freqs[i].current for i in logical_cpus) / len(logical_cpus)
 
     return avg_freq
 
-# qui sotto nuova get_cpu_report
+#
 def get_cpu_report(physical_core_id=None):
     report = {}
-    # check psultil version - bug in 5.9.0 
+    # check psultil version - there is a bug in 5.9.0
     # psutil_version = tuple(map(int, psutil.__version__.split('.')))
     if physical_core_id is not None and sys.platform.startswith("linux"):
         try:
@@ -105,7 +104,7 @@ def get_cpu_report(physical_core_id=None):
                         break
         except FileNotFoundError:
             pass
-        # Proviamo a leggere TDP se disponibile
+        # Try to read the TDP, if available
         try:
             tdp_output = subprocess.check_output("lscpu", shell=True).decode()
             for line in tdp_output.splitlines():
@@ -122,7 +121,7 @@ def get_cpu_report(physical_core_id=None):
             ).strip().decode()
         except Exception:
             pass
-        report["cpu_power_watt"] = None  # non disponibile nativamente
+        report["cpu_power_watt"] = None  # Not available
 
     elif sys.platform == "win32":  # Windows
         try:
@@ -131,11 +130,11 @@ def get_cpu_report(physical_core_id=None):
             ).decode().split("\n")[1].strip()
         except Exception:
             pass
-        report["cpu_power_watt"] = None  # non disponibile via WMI standard
+        report["cpu_power_watt"] = None  # not available through standard WMI
 
     report["cpu_model_name"] = model_name or platform.processor() or "N/A"
 
-    # --- Lookup TDP (se non già trovato dal sistema) ---
+    # --- Look up the TDP (if not ready detected by the system) ---
     if report.get("cpu_power_watt") in [None, ""]:
         tdp_value = lookup_tdp(report["cpu_model_name"])
         report["cpu_power_watt"] = f"{tdp_value} W" if tdp_value else None
@@ -143,77 +142,6 @@ def get_cpu_report(physical_core_id=None):
 
     return report
 
-
-def NO_get_cpu_report():
-    report = {}
-    
-    # --- Frequenze ---
-    freq = psutil.cpu_freq()
-    psutil_version = psutil.version_info
-    if freq:
-        if psutil_version == (5, 9, 0):
-            report["cpu_mhz"] = round(freq.current*1000, 2) # frequenza attuale
-        else:
-            report["cpu_mhz"] = round(freq.current, 2) # frequenza attuale
-        
-        # print("sono in GET CPU REPORT -- frequenza attuale-corrente", report["cpu_mhz"])
-        report["cpu_clock_min_mhz"] = round(freq.min, 2)
-        report["cpu_clock_max_mhz"] = round(freq.max, 2)  # "potenza max"
-    else:
-        report["cpu_mhz"] = report["cpu_clock_min_mhz"] = report["cpu_clock_max_mhz"] = "N/A"
-
-    # --- Cores ---
-    report["cpu_cores_physical"] = psutil.cpu_count(logical=False)
-    report["cpu_cores_logical"] = psutil.cpu_count(logical=True)
-
-    # --- Model name CPU (OS specific) ---
-    model_name = None
-    if sys.platform.startswith("linux"):
-        try:
-            with open("/proc/cpuinfo") as f:
-                for line in f:
-                    if "model name" in line:
-                        model_name = line.strip().split(":")[1].strip()
-                        break
-        except FileNotFoundError:
-            pass
-        # Proviamo a leggere TDP se disponibile
-        try:
-            tdp_output = subprocess.check_output("lscpu", shell=True).decode()
-            for line in tdp_output.splitlines():
-                if "TDP" in line:
-                    report["cpu_power_watt"] = line.split(":")[1].strip()
-                    break
-        except Exception:
-            report["cpu_power_watt"] = None
-
-    elif sys.platform == "darwin":  # macOS
-        try:
-            model_name = subprocess.check_output(
-                ["sysctl", "-n", "machdep.cpu.brand_string"]
-            ).strip().decode()
-        except Exception:
-            pass
-        report["cpu_power_watt"] = None  # non disponibile nativamente
-
-    elif sys.platform == "win32":  # Windows
-        try:
-            model_name = subprocess.check_output(
-                ["wmic", "cpu", "get", "Name"]
-            ).decode().split("\n")[1].strip()
-        except Exception:
-            pass
-        report["cpu_power_watt"] = None  # non disponibile via WMI standard
-
-    report["cpu_model_name"] = model_name or platform.processor() or "N/A"
-
-    # --- Lookup TDP (se non già trovato dal sistema) ---
-    if report.get("cpu_power_watt") in [None, ""]:
-        tdp_value = lookup_tdp(report["cpu_model_name"])
-        report["cpu_power_watt"] = f"{tdp_value} W" if tdp_value else None
-
-    return report
-    
 # ----------------------------
 # Utilities
 # ----------------------------
@@ -489,7 +417,7 @@ class StatsWorker(threading.Thread):
             # print("frequenza attuale-corrente", cpu_cur)
             self.list_cpu_curr.append(cpu_cur)
             
-            # Costruisci la riga con i campi aggiuntivi
+            # build the row with the additional fields
             #line_with_cpu = f"{line.split(',')[0]},{line.split(',')[1]},{cpu_cur},{cpu_min},{cpu_max}," + ",".join(
             #    line.split(',')[2:])
             line_with_cpu = f"{line},{cpu_cur},{cpu_min},{cpu_max}"
@@ -552,7 +480,7 @@ class StatsWorker(threading.Thread):
             self.log(f"ERROR preparing CSV: {e}")
             return
     
-        # Lista per tutte le frequenze raccolte
+        # list of all collected frequencies
         self.list_cpu_curr = []
     
         self.log(f"Outputs:\n- Config: {files['config']}\n- CSV: {files['csv']}")
@@ -569,17 +497,17 @@ class StatsWorker(threading.Thread):
                 self.log(f"[{i}] Iteration aborted due to errors.")
                 break
     
-        # Tutte le iterazioni completate → calcolo media CPU
+        # all iteration completed --> calculate average CPU usage
         self.log("All iterations completed. Calculating average CPU frequency...")
     
-        # Otteniamo info CPU max and min
+        # retrieve max and min CPU info
         # cpu_info = get_cpu_report(physical_core_id=p["cpuset_cpus"])
         physical_cores = [int(x) for x in p["cpuset_cpus"].split(',') if x.strip().isdigit()]
         # print('physical cores', physical_cores)
         cpu_info = get_cpu_report(physical_core_id=physical_cores[0] if physical_cores else None)
 
     
-        # Calcoliamo media CPU MHz raccolta durante le iterazioni
+        # calculate the average CPU freq (MHz) collected during the iterarions
         psutil_version = psutil.version_info
         if self.list_cpu_curr:
             if psutil_version == (5,9,0):
@@ -589,7 +517,7 @@ class StatsWorker(threading.Thread):
         else:
             avg_cpu_mhz = cpu_info["cpu_mhz"]
     
-        # Creiamo l’oggetto JSON finale
+        # JSON
         config_obj = {
             "timestamp": ts,
             "output_basename": base,
@@ -810,7 +738,7 @@ class App(tk.Tk):
             self.stop_event.set()
             self._log_to_ui("Stop requested. Attempting to halt gracefully...")
     
-        # Legge il nome del container dalla StringVar di Tkinter
+        # read the contaienr name from the Tkinter StringVar
         container_name = self.var_container.get().strip() if hasattr(self, "var_container") else None
     
         if container_name:
@@ -823,7 +751,7 @@ class App(tk.Tk):
         else:
             self._log_to_ui("No container name defined — skipping Docker stop.")
     
-        # Rimuove i container fermi (status=exited)
+        # remove stopped containers (status=exited)
         try:
             self._log_to_ui("Removing stopped containers...")
             exited_containers = subprocess.check_output(
