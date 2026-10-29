@@ -13,7 +13,7 @@ import sys
 import subprocess
 import pprint
 
-# Lookup table con (Thermal Design Power) TDP (aggiungine altri modelli se serve)
+# TDP (Thermal Design Power) lookup table (add more models if needed)
 CPU_TDP_TABLE = {
     "Intel(R) Core(TM) i7-9750H": 45,
     "Intel(R) Core(TM) i5-8250U": 15,
